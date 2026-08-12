@@ -2,10 +2,26 @@ pipeline {
     agent any
 
     stages {
-        stage('Hello') {
+
+        stage('Environment') {
             steps {
-                echo 'Hello from Jenkins!'
+                sh '''
+                    echo "===== SYSTEM ====="
+                    whoami
+                    pwd
+
+                    echo "===== PYTHON ====="
+                    python3 --version
+                    which python3
+
+                    echo "===== GIT ====="
+                    git --version
+
+                    echo "===== PROJECT ====="
+                    ls -la
+                '''
             }
         }
+
     }
 }
