@@ -27,7 +27,7 @@ pipeline {
                         python -m ensurepip --upgrade
                         python -m pip install --upgrade pip
                         
-                        pip install pytest
+                        pip install pytest build
                         pip install -e .
                     '''
                 }
@@ -38,7 +38,7 @@ pipeline {
             steps {
                 dir('python-module') {
                     sh '''
-                        . .venv/bin/activate
+                        source .venv/bin/activate
                         pytest
                     '''
                 }
