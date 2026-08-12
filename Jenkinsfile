@@ -6,19 +6,23 @@ pipeline {
         stage('Environment') {
             steps {
                 sh '''
-                    echo "===== SYSTEM ====="
-                    whoami
-                    pwd
-
-                    echo "===== PYTHON ====="
                     python3 --version
-                    which python3
-
-                    echo "===== GIT ====="
                     git --version
-
-                    echo "===== PROJECT ====="
+                    pwd
                     ls -la
+                '''
+            }
+        }
+
+        stage('Install Dependencies') {
+            steps {
+                sh '''
+                    python3 -m venv .venv
+
+                    . .venv/bin/activate
+
+                    python -m pip install --upgrade pip
+                    pip install build pytest twine
                 '''
             }
         }
