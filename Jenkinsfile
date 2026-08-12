@@ -6,6 +6,7 @@ pipeline {
         stage('Environment') {
             steps {
                 sh '''
+                    echo "===== ENVIRONMENT ====="
                     python3 --version
                     git --version
                     pwd
@@ -16,38 +17,44 @@ pipeline {
 
         stage('Install Dependencies') {
             steps {
-                sh '''
-                    python3 -m venv .venv
+                dir('python-module') {
+                    sh '''
+                        python3 -m venv .venv
+                        . .venv/bin/activate
 
-                    . .venv/bin/activate
-
-                    python -m pip install --upgrade pip
-                    pip install build pytest twine
-                '''
+                        python -m pip install --upgrade pip
+                        pip install build pytest twine
+                    '''
+                }
             }
         }
 
         stage('Test') {
             steps {
-                sh '''
-                . .venv/bin/activate
-                pytest
-                '''
+                dir('python-module') {
+                    sh '''
+                        . .venv/bin/activate
+                        pytest
+                    '''
                 }
-            } 	
+            }
+        }
 
         stage('Build') {
             steps {
-            sh '''
-                . .venv/bin/activate
+                dir('python-module') {
+                    sh '''
+                        . .venv/bin/activate
 
-                rm -rf python-module/dist/
-                python -m build
+                        rm -rf dist/
+                        python -m build
 
-                echo "===== BUILD ARTIFACTS ====="
-                ls -lah python-module/dist/
-            '''
+                        echo "===== BUILD ARTIFACTS ====="
+                        ls -lah dist/
+                    '''
+                }
             }
         }
+
     }
 }
