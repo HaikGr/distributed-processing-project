@@ -27,27 +27,26 @@ pipeline {
             }
         }
 
-	stage('Test') {
- 	   steps {
-        	sh '''
-          	  . .venv/bin/activate
-          	  pytest
-       		   '''
+        stage('Test') {
+            steps {
+                sh '''
+                . .venv/bin/activate
+                pytest
+                '''
+                }
+            } 	
+
+        stage('Build') {
+            steps {
+            sh '''
+                . .venv/bin/activate
+
+                rm -rf python-module/dist/
+                python -m build
+
+                echo "===== BUILD ARTIFACTS ====="
+                ls -lah python-module/dist/
+            '''
             }
-        } 	
-    }
-
-    stage('Build') {
-    steps {
-        sh '''
-            . .venv/bin/activate
-
-            rm -rf python-module/dist/
-            python -m build
-
-            echo "===== BUILD ARTIFACTS ====="
-            ls -lah python-module/dist/
-        '''
-    }
-    }
+        }
 }
