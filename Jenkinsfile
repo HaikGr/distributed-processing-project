@@ -19,11 +19,15 @@ pipeline {
             steps {
                 dir('python-module') {
                     sh '''
+                        rm -rf .venv
                         python3 -m venv .venv
-                        . .venv/bin/activate
 
+                        source .venv/bin/activate
+
+                        python -m ensurepip --upgrade
                         python -m pip install --upgrade pip
-                        pip install build pytest twine
+
+                        pip install -e .
                     '''
                 }
             }
