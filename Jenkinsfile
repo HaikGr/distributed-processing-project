@@ -49,7 +49,7 @@ pipeline {
             steps {
                 dir('python-module') {
                     sh '''
-                        . .venv/bin/activate
+                        source .venv/bin/activate
 
                         rm -rf dist/
                         python -m build
