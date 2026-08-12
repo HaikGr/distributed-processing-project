@@ -35,6 +35,19 @@ pipeline {
        		   '''
             }
         } 	
+    }
 
+    stage('Build') {
+    steps {
+        sh '''
+            . .venv/bin/activate
+
+            rm -rf python-module/dist/
+            python -m build
+
+            echo "===== BUILD ARTIFACTS ====="
+            ls -lah python-module/dist/
+        '''
+    }
     }
 }
