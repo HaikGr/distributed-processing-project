@@ -27,7 +27,7 @@ pipeline {
                         python -m ensurepip --upgrade
                         python -m pip install --upgrade pip
                         
-                        pip install pytest build
+                        pip install pytest build twine
                         pip install -e .
                     '''
                 }
@@ -57,6 +57,30 @@ pipeline {
                         echo "===== BUILD ARTIFACTS ====="
                         ls -lah dist/
                     '''
+                }
+            }
+        }
+
+        stage('Publish to Nexus') {
+            steps {
+                dir('python-module') {
+                    withCredentials([
+                        usernamePassword(
+                            credentialsId: 'nexus-key',
+                            usernameVariable: 'NEXUS_USERNAME',
+                            passwordVariable: 'NEXUS_PASSWORD'
+                        )
+                    ]) {
+                        sh '''
+                            source .venv/bin/activate
+
+                            python -m twine upload \
+                                --repository-url http://localhost:8081/repository/pypi-hosted/ \
+                                --username "$NEXUS_USERNAME" \
+                                --password "$NEXUS_PASSWORD" \
+                                dist/*
+                        '''
+                    }
                 }
             }
         }
