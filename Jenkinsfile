@@ -26,7 +26,8 @@ pipeline {
 
                         python -m ensurepip --upgrade
                         python -m pip install --upgrade pip
-
+                        
+                        pip install pytest
                         pip install -e .
                     '''
                 }
