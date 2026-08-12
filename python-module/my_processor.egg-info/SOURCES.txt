@@ -1,0 +1,7 @@
+pyproject.toml
+my_processor/__init__.py
+my_processor/processor.py
+my_processor.egg-info/PKG-INFO
+my_processor.egg-info/SOURCES.txt
+my_processor.egg-info/dependency_links.txt
+my_processor.egg-info/top_level.txt
