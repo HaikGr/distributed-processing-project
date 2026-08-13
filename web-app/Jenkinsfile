@@ -98,7 +98,7 @@ print('my_processor location:', my_processor.__file__)
                     ]) {
                         sh '''
                             docker build \
-                                --build-arg NEXUS_URL="http://${NEXUS_USER}:${NEXUS_PASSWORD}@host.docker.internal:8081/repository/pypi-group/simple/" \
+                                --build-arg NEXUS_URL="http://${NEXUS_USER}:${NEXUS_PASSWORD}@localhost:8081/repository/pypi-group/simple/" \
                                 -t ${IMAGE_NAME}:${BUILD_NUMBER} \
                                 -t ${IMAGE_NAME}:latest \
                                 .
