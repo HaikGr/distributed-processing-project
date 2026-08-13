@@ -1,4 +1,4 @@
-FROM python:3.14-slim
+FROM python:3.12-slim
 
 WORKDIR /app
 
@@ -9,6 +9,7 @@ ARG NEXUS_URL
 RUN python -m pip install --upgrade pip
 
 RUN pip install --no-cache-dir \
+    --trusted-host host.docker.internal \
     --index-url "${NEXUS_URL}" \
     -r requirements.txt
 
