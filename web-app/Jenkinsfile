@@ -1,0 +1,80 @@
+pipeline {
+    agent any
+
+    triggers {
+        githubPush()
+    }
+
+    environment {
+        IMAGE_NAME = 'distributed-web-app'
+    }
+
+    stages {
+
+        stage('Environment') {
+            steps {
+                sh '''
+                    echo "===== ENVIRONMENT ====="
+                    python3 --version
+                    docker --version
+                    git --version
+                    pwd
+                    ls -la
+                '''
+            }
+        }
+
+        stage('Install Dependencies') {
+            steps {
+                dir('web-app') {
+                    sh '''
+                        python3 -m venv .venv
+                        .venv/bin/pip install --upgrade pip
+                        .venv/bin/pip install -r requirements.txt
+                    '''
+                }
+            }
+        }
+
+        stage('Test') {
+            steps {
+                dir('web-app') {
+                    sh '''
+                        .venv/bin/python -c "from app import app; print('Application import successful')"
+                    '''
+                }
+            }
+        }
+
+        stage('Docker Build') {
+            steps {
+                dir('web-app') {
+                    sh '''
+                        docker build \
+                            -t ${IMAGE_NAME}:${BUILD_NUMBER} \
+                            -t ${IMAGE_NAME}:latest \
+                            .
+                    '''
+                }
+            }
+        }
+
+        stage('Docker Images') {
+            steps {
+                sh '''
+                    docker images ${IMAGE_NAME}
+                '''
+            }
+        }
+    }
+
+    post {
+        success {
+            echo 'Web application Docker image built successfully.'
+        }
+
+        failure {
+            echo 'Web application pipeline failed.'
+        }
+    }
+}
