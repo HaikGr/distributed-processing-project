@@ -4,9 +4,11 @@ WORKDIR /app
 
 COPY requirements.txt .
 
-COPY my_processor-0.1.0-py3-none-any.whl .
+ARG NEXUS_URL
 
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir \
+    --index-url "${NEXUS_URL}" \
+    -r requirements.txt
 
 COPY app.py .
 COPY dynamodb.py .

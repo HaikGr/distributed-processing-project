@@ -7,7 +7,10 @@ pipeline {
 
     environment {
         PATH = "/Users/user/.docker/bin:/usr/local/bin:/usr/bin:/bin:${env.PATH}"
+
         IMAGE_NAME = 'distributed-web-app'
+
+        NEXUS_PYPI_URL = 'http://localhost:8081/repository/pypi-group/simple/'
     }
 
     stages {
@@ -28,11 +31,40 @@ pipeline {
         stage('Install Dependencies') {
             steps {
                 dir('web-app') {
-                    sh '''
-                        python3 -m venv .venv
-                        .venv/bin/pip install --upgrade pip
-                        .venv/bin/pip install -r requirements.txt
-                    '''
+                    withCredentials([
+                        usernamePassword(
+                            credentialsId: 'nexus-pypi',
+                            usernameVariable: 'NEXUS_USER',
+                            passwordVariable: 'NEXUS_PASSWORD'
+                        )
+                    ]) {
+                        sh '''
+                            set -e
+
+                            echo "===== CREATE VIRTUAL ENVIRONMENT ====="
+
+                            rm -rf .venv
+                            python3 -m venv .venv
+
+                            .venv/bin/python -m pip install --upgrade pip
+
+                            echo "===== INSTALL REQUIREMENTS FROM NEXUS ====="
+
+                            .venv/bin/pip install \
+                                --index-url "http://${NEXUS_USER}:${NEXUS_PASSWORD}@localhost:8081/repository/pypi-group/simple/" \
+                                -r requirements.txt
+
+                            echo "===== INSTALL MY-PROCESSOR FROM NEXUS ====="
+
+                            .venv/bin/pip install \
+                                --index-url "http://${NEXUS_USER}:${NEXUS_PASSWORD}@localhost:8081/repository/pypi-group/simple/" \
+                                my_processor==0.1.0
+
+                            echo "===== INSTALLED PACKAGES ====="
+
+                            .venv/bin/pip list
+                        '''
+                    }
                 }
             }
         }
@@ -41,7 +73,19 @@ pipeline {
             steps {
                 dir('web-app') {
                     sh '''
-                        .venv/bin/python -c "from app import app; print('Application import successful')"
+                        set -e
+
+                        echo "===== TEST APPLICATION IMPORT ====="
+
+                        .venv/bin/python -c "
+from app import app
+import my_processor
+
+print('Application import successful')
+print('my_processor import successful')
+print('my_processor location:', my_processor.__file__)
+"
+
                     '''
                 }
             }
@@ -50,12 +94,21 @@ pipeline {
         stage('Docker Build') {
             steps {
                 dir('web-app') {
-                    sh '''
-                        docker build \
-                            -t ${IMAGE_NAME}:${BUILD_NUMBER} \
-                            -t ${IMAGE_NAME}:latest \
-                            .
-                    '''
+                    withCredentials([
+                        usernamePassword(
+                            credentialsId: 'nexus-pypi',
+                            usernameVariable: 'NEXUS_USER',
+                            passwordVariable: 'NEXUS_PASSWORD'
+                        )
+                    ]) {
+                        sh '''
+                            docker build \
+                                --build-arg NEXUS_URL="http://${NEXUS_USER}:${NEXUS_PASSWORD}@host.docker.internal:8081/repository/pypi-group/simple/" \
+                                -t ${IMAGE_NAME}:${BUILD_NUMBER} \
+                                -t ${IMAGE_NAME}:latest \
+                                .
+                        '''
+                    }
                 }
             }
         }
@@ -63,6 +116,8 @@ pipeline {
         stage('Docker Images') {
             steps {
                 sh '''
+                    echo "===== DOCKER IMAGES ====="
+
                     docker images ${IMAGE_NAME}
                 '''
             }
