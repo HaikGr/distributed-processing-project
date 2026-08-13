@@ -2,4 +2,4 @@ fastapi
 uvicorn[standard]
 boto3
 botocore[crt]
-my-processor==0.1.0
+my_processor==0.1.0
