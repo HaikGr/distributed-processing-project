@@ -1,10 +1,12 @@
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 WORKDIR /app
 
 COPY requirements.txt .
 
 ARG NEXUS_URL
+
+RUN python -m pip install --upgrade pip
 
 RUN pip install --no-cache-dir \
     --index-url "${NEXUS_URL}" \
