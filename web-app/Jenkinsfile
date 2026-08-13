@@ -119,6 +119,23 @@ print('my_processor location:', my_processor.__file__)
         }
     }
 
+    stage('Push Docker Image') {
+    steps {
+        sh '''
+            docker login localhost:8082 \
+                -u "${NEXUS_USER}" \
+                -p "${NEXUS_PASSWORD}"
+
+            docker tag \
+                ${IMAGE_NAME}:${BUILD_NUMBER} \
+                localhost:8082/${IMAGE_NAME}:${BUILD_NUMBER}
+
+            docker push \
+                localhost:8082/${IMAGE_NAME}:${BUILD_NUMBER}
+        '''
+    }
+    }
+
     post {
         success {
             echo 'Web application Docker image built successfully.'
