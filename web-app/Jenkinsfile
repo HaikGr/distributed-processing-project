@@ -54,11 +54,6 @@ pipeline {
                                 --index-url "http://${NEXUS_USER}:${NEXUS_PASSWORD}@localhost:8081/repository/pypi-group/simple/" \
                                 -r requirements.txt
 
-                            echo "===== INSTALL MY-PROCESSOR FROM NEXUS ====="
-
-                            .venv/bin/pip install \
-                                --index-url "http://${NEXUS_USER}:${NEXUS_PASSWORD}@localhost:8081/repository/pypi-group/simple/" \
-                                my_processor==0.1.0
 
                             echo "===== INSTALLED PACKAGES ====="
 
