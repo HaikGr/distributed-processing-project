@@ -33,7 +33,7 @@ pipeline {
                 dir('web-app') {
                     withCredentials([
                         usernamePassword(
-                            credentialsId: 'nexus-pypi',
+                            credentialsId: 'nexus-key',
                             usernameVariable: 'NEXUS_USER',
                             passwordVariable: 'NEXUS_PASSWORD'
                         )
