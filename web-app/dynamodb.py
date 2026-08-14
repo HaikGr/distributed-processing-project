@@ -1,14 +1,17 @@
-import boto3
 import os
-
+import boto3
 
 TABLE_NAME = os.getenv(
     "DYNAMODB_TABLE",
     "distributed-processing"
 )
 
+DYNAMODB_ENDPOINT = os.getenv("DYNAMODB_ENDPOINT")
 
-dynamodb = boto3.resource("dynamodb", region_name=os.environ["AWS_DEFAULT_REGION"])
+dynamodb = boto3.resource(
+    "dynamodb",
+    endpoint_url=DYNAMODB_ENDPOINT
+)
 
 table = dynamodb.Table(TABLE_NAME)
 

@@ -10,7 +10,7 @@ TABLE_NAME = os.getenv(
     "distributed-workers",
 )
 
-dynamodb = boto3.resource("dynamodb")
+dynamodb = boto3.resource("dynamodb", region_name=os.environ["AWS_DEFAULT_REGION"])
 table = dynamodb.Table(TABLE_NAME)
 
 
