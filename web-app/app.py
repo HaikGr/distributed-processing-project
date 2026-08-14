@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 from worker import register_worker
 from dynamodb import save_request
-from my_processor.processor import process
+from my_processor.processor import processor
 
 
 app = FastAPI()
