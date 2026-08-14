@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 from worker import register_worker
 from dynamodb import save_request
-from my_processor.processor import processor
+from my_processor import process_text
 
 
 app = FastAPI()
@@ -410,7 +410,7 @@ def process_text(request: TextRequest):
 
 
     # Process text using your my_processor module
-    processed_text = process(request.text)
+    processed_text = process_text(request.text)
 
 
     # Save request and result to DynamoDB
