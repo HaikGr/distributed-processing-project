@@ -11,6 +11,8 @@ pipeline {
         IMAGE_NAME = 'distributed-web-app'
 
         NEXUS_PYPI_URL = 'http://localhost:8081/repository/pypi-group/simple/'
+
+        AWS_DEFAULT_REGION = 'us-east-1'
     }
 
     stages {
@@ -101,6 +103,7 @@ print('my_processor location:', my_processor.__file__)
                                 --build-arg NEXUS_URL="http://${NEXUS_USER}:${NEXUS_PASSWORD}@host.docker.internal:8081/repository/pypi-group/simple/" \
                                 -t ${IMAGE_NAME}:${BUILD_NUMBER} \
                                 -t ${IMAGE_NAME}:latest \
+                                --set aws.region=${AWS_DEFAULT_REGION}
                                 .
                         '''
                     }
