@@ -403,7 +403,7 @@ def home():
 
 
 @app.post("/process")
-def process_text(request: TextRequest):
+def process_request(request: TextRequest):
 
     # Generate unique request ID
     request_id = str(uuid.uuid4())
