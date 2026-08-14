@@ -8,7 +8,7 @@ TABLE_NAME = os.getenv(
 )
 
 
-dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+dynamodb = boto3.resource("dynamodb", region_name=os.environ["AWS_DEFAULT_REGION"])
 
 table = dynamodb.Table(TABLE_NAME)
 
