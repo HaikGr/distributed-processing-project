@@ -1,27 +1,32 @@
-import os
 import boto3
+import os
+
 
 TABLE_NAME = os.getenv(
     "DYNAMODB_TABLE",
     "distributed-processing"
 )
 
-DYNAMODB_ENDPOINT = os.getenv("DYNAMODB_ENDPOINT")
 
 dynamodb = boto3.resource(
     "dynamodb",
-    endpoint_url=DYNAMODB_ENDPOINT
+    region_name=os.environ["AWS_DEFAULT_REGION"]
 )
 
 table = dynamodb.Table(TABLE_NAME)
 
 
-def save_request(request_id: str, text: str):
+def save_request(
+    request_id: str,
+    text: str,
+    processed_text: str,
+):
     table.put_item(
         Item={
             "request_id": request_id,
             "text": text,
-            "status": "PROCESSING",
+            "processed_text": processed_text,
+            "status": "COMPLETED",
         }
     )
 
