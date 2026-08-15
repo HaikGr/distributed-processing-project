@@ -3,16 +3,63 @@ import uuid
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
-
-from worker import register_worker
-from dynamodb import save_request
 from my_processor import process_text
+import asyncio
+from contextlib import asynccontextmanager
+from worker import (
+    register_worker,
+    heartbeat,
+    unregister_worker,
+    get_active_workers,
+)
+from dynamodb import (
+    save_request,
+    get_all_requests,
+)
+
+worker_id = None
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+
+    global worker_id
+
+    # Register this pod
+    worker_id = register_worker()
+
+    async def heartbeat_loop():
+
+        while True:
+
+            try:
+                await asyncio.to_thread(heartbeat)
+
+            except Exception as e:
+                print(f"Heartbeat failed: {e}")
+
+            await asyncio.sleep(10)
+
+    task = asyncio.create_task(heartbeat_loop())
+
+    try:
+        yield
+
+    finally:
+
+        task.cancel()
+
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+        try:
+            unregister_worker()
+        except Exception as e:
+            print(f"Failed to unregister worker: {e}")
 
 
-app = FastAPI()
-
-# Register this Kubernetes pod as a worker
-worker_id = register_worker()
+app = FastAPI(lifespan=lifespan)
 
 
 class TextRequest(BaseModel):
@@ -405,30 +452,58 @@ def home():
 @app.post("/process")
 def process_request(request: TextRequest):
 
-    # Generate unique request ID
     request_id = str(uuid.uuid4())
 
-
-    # Process text using your my_processor module
     processed_text = process_text(request.text)
 
-
-    # Save request and result to DynamoDB
     save_request(
         request_id=request_id,
         text=request.text,
         processed_text=processed_text,
+        worker_id=worker_id,
     )
-
 
     return {
         "request_id": request_id,
-
         "status": "COMPLETED",
-
         "original_text": request.text,
-
         "processed_text": processed_text,
-
         "worker_id": worker_id,
+    }
+
+
+
+
+
+@app.get("/workers")
+def workers():
+
+    workers = get_active_workers()
+    requests = get_all_requests()
+
+    result = []
+
+    for worker in workers:
+
+        worker_id = worker["worker_id"]
+
+        worker_requests = [
+            request
+            for request in requests
+            if request.get("worker_id") == worker_id
+        ]
+
+        result.append(
+            {
+                "worker_id": worker_id,
+                "status": worker.get("status"),
+                "last_heartbeat": worker.get("last_heartbeat"),
+                "requests_processed": len(worker_requests),
+                "requests": worker_requests,
+            }
+        )
+
+    return {
+        "total_active_workers": len(result),
+        "workers": result,
     }

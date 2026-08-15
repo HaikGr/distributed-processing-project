@@ -10,12 +10,23 @@ TABLE_NAME = os.getenv(
     "distributed-workers",
 )
 
-dynamodb = boto3.resource("dynamodb", region_name=os.environ["AWS_DEFAULT_REGION"])
+dynamodb = boto3.resource(
+    "dynamodb",
+    region_name=os.environ["AWS_DEFAULT_REGION"],
+)
+
 table = dynamodb.Table(TABLE_NAME)
 
 
 def get_worker_id() -> str:
-    return os.getenv("WORKER_ID", socket.gethostname())
+    return os.getenv(
+        "WORKER_ID",
+        socket.gethostname(),
+    )
+
+
+def get_current_time() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 def register_worker():
@@ -25,7 +36,7 @@ def register_worker():
         Item={
             "worker_id": worker_id,
             "status": "ACTIVE",
-            "last_heartbeat": datetime.now(timezone.utc).isoformat(),
+            "last_heartbeat": get_current_time(),
         }
     )
 
@@ -39,13 +50,37 @@ def heartbeat():
         Key={
             "worker_id": worker_id,
         },
-        UpdateExpression="SET #status = :status, last_heartbeat = :heartbeat",
+        UpdateExpression="""
+            SET #status = :status,
+                last_heartbeat = :heartbeat
+        """,
         ExpressionAttributeNames={
             "#status": "status",
         },
         ExpressionAttributeValues={
             ":status": "ACTIVE",
-            ":heartbeat": datetime.now(timezone.utc).isoformat(),
+            ":heartbeat": get_current_time(),
+        },
+    )
+
+
+def unregister_worker():
+    worker_id = get_worker_id()
+
+    table.update_item(
+        Key={
+            "worker_id": worker_id,
+        },
+        UpdateExpression="""
+            SET #status = :status,
+                last_heartbeat = :heartbeat
+        """,
+        ExpressionAttributeNames={
+            "#status": "status",
+        },
+        ExpressionAttributeValues={
+            ":status": "INACTIVE",
+            ":heartbeat": get_current_time(),
         },
     )
 
