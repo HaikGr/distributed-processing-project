@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from my_processor import process_text
+from postgres import init_db
 import asyncio
 from contextlib import asynccontextmanager
 from worker import (
@@ -12,10 +13,8 @@ from worker import (
     unregister_worker,
     get_active_workers,
 )
-from dynamodb import (
-    save_request,
-    get_all_requests,
-)
+from dynamodb import get_all_requests as get_cache_requests
+from postgres import save_request
 
 worker_id = None
 
@@ -23,6 +22,8 @@ worker_id = None
 async def lifespan(app: FastAPI):
 
     global worker_id
+
+    init_db()
 
     # Register this pod
     worker_id = register_worker()
