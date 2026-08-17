@@ -13,6 +13,8 @@ pipeline {
         NEXUS_PYPI_URL = 'http://localhost:8081/repository/pypi-group/simple/'
 
         AWS_DEFAULT_REGION = 'us-east-1'
+
+        GITOPS_REPO = 'https://github.com/HaikGr/distributed-web-app-deployment.git'
     }
 
     stages {
@@ -26,6 +28,9 @@ pipeline {
                     git --version
                     pwd
                     ls -la
+
+                    echo "===== BUILD ====="
+                    echo "BUILD_NUMBER=${BUILD_NUMBER}"
                 '''
             }
         }
@@ -56,7 +61,6 @@ pipeline {
                                 --index-url "http://${NEXUS_USER}:${NEXUS_PASSWORD}@localhost:8081/repository/pypi-group/simple/" \
                                 -r requirements.txt
 
-
                             echo "===== INSTALLED PACKAGES ====="
 
                             .venv/bin/pip list
@@ -77,6 +81,10 @@ pipeline {
                         )
                     ]) {
                         sh '''
+                            set -e
+
+                            echo "===== DOCKER BUILD ====="
+
                             docker build \
                                 --build-arg NEXUS_URL="http://${NEXUS_USER}:${NEXUS_PASSWORD}@host.docker.internal:8081/repository/pypi-group/simple/" \
                                 -t ${IMAGE_NAME}:${BUILD_NUMBER} \
@@ -98,45 +106,113 @@ pipeline {
             }
         }
 
+        stage('Push Docker Image') {
+            steps {
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'nexus-key',
+                        usernameVariable: 'NEXUS_USER',
+                        passwordVariable: 'NEXUS_PASSWORD'
+                    )
+                ]) {
+                    sh '''
+                        set -e
 
-stage('Push Docker Image') {
-    steps {
-        withCredentials([
-            usernamePassword(
-                credentialsId: 'nexus-key',
-                usernameVariable: 'NEXUS_USER',
-                passwordVariable: 'NEXUS_PASSWORD'
-            )
-        ]) {
-            sh '''
-                set -e
+                        echo "===== LOGIN TO NEXUS DOCKER REGISTRY ====="
 
-                echo "===== LOGIN TO NEXUS DOCKER REGISTRY ====="
+                        echo "${NEXUS_PASSWORD}" | docker login localhost:8082 \
+                            --username "${NEXUS_USER}" \
+                            --password-stdin
 
-                echo "${NEXUS_PASSWORD}" | docker login localhost:8082 \
-                    --username "${NEXUS_USER}" \
-                    --password-stdin
+                        echo "===== TAG IMAGE ====="
 
-                echo "===== TAG IMAGE ====="
+                        docker tag \
+                            ${IMAGE_NAME}:${BUILD_NUMBER} \
+                            localhost:8082/${IMAGE_NAME}:${BUILD_NUMBER}
 
-                docker tag \
-                    ${IMAGE_NAME}:${BUILD_NUMBER} \
-                    localhost:8082/${IMAGE_NAME}:${BUILD_NUMBER}
+                        echo "===== PUSH IMAGE ====="
 
-                echo "===== PUSH IMAGE ====="
+                        docker push \
+                            localhost:8082/${IMAGE_NAME}:${BUILD_NUMBER}
 
-                docker push \
-                    localhost:8082/${IMAGE_NAME}:${BUILD_NUMBER}
-            '''
+                        echo "===== IMAGE PUSHED ====="
+
+                        echo "localhost:8082/${IMAGE_NAME}:${BUILD_NUMBER}"
+                    '''
+                }
+            }
+        }
+
+        stage('Update GitOps Repository') {
+            steps {
+                dir('gitops') {
+
+                    deleteDir()
+
+                    withCredentials([
+                        usernamePassword(
+                            credentialsId: 'github-gitops',
+                            usernameVariable: 'GITHUB_USER',
+                            passwordVariable: 'GITHUB_TOKEN'
+                        )
+                    ]) {
+                        sh '''
+                            set -e
+
+                            echo "===== CLONE GITOPS REPOSITORY ====="
+
+                            git clone \
+                                "https://${GITHUB_USER}:${GITHUB_TOKEN}@github.com/HaikGr/distributed-web-app-deployment.git" \
+                                .
+
+                            git config user.name "Jenkins"
+                            git config user.email "jenkins@localhost"
+
+                            echo "===== CURRENT VALUES ====="
+
+                            cat helm/distributed-web-app/values.yaml
+
+                            echo "===== UPDATE IMAGE TAG ====="
+
+                            sed -i.bak \
+                                "s/^  tag: .*/  tag: \\"${BUILD_NUMBER}\\"/" \
+                                helm/distributed-web-app/values.yaml
+
+                            rm -f helm/distributed-web-app/values.yaml.bak
+
+                            echo "===== UPDATED VALUES ====="
+
+                            cat helm/distributed-web-app/values.yaml
+
+                            echo "===== GIT DIFF ====="
+
+                            git diff
+
+                            git add helm/distributed-web-app/values.yaml
+
+                            if git diff --cached --quiet; then
+                                echo "No changes to commit."
+                                exit 0
+                            fi
+
+                            git commit \
+                                -m "chore: update image tag to ${BUILD_NUMBER}"
+
+                            echo "===== PUSH GITOPS CHANGE ====="
+
+                            git push origin HEAD:main
+
+                            echo "===== GITOPS UPDATE COMPLETE ====="
+                        '''
+                    }
+                }
+            }
         }
     }
-}
-    }
-
 
     post {
         success {
-            echo 'Web application Docker image built successfully.'
+            echo 'Web application Docker image built, pushed to Nexus, and GitOps repository updated successfully.'
         }
 
         failure {
