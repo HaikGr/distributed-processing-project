@@ -16,6 +16,7 @@ RUN pip install --no-cache-dir \
 COPY app.py .
 COPY dynamodb.py .
 COPY worker.py .
+COPY postgres.py .
 
 EXPOSE 8000
 
