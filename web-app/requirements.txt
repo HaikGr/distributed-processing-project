@@ -3,4 +3,4 @@ uvicorn[standard]
 boto3[standard]
 botocore[crt]
 psycopg[binary]
-my_processor==0.1.5
+my_processor==0.1.6
