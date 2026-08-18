@@ -137,3 +137,46 @@ def get_all_requests():
         }
         for row in rows
     ]
+
+def get_request(request_id: str):
+
+    with get_connection() as conn:
+
+        with conn.cursor() as cursor:
+
+            cursor.execute(
+                """
+                SELECT
+                    request_id,
+                    text,
+                    processed_text,
+                    status,
+                    worker_id,
+                    created_at,
+                    completed_at
+                FROM requests
+                WHERE request_id = %s;
+                """,
+                (request_id,),
+            )
+
+            row = cursor.fetchone()
+
+
+    if row is None:
+        return None
+
+
+    return {
+        "request_id": row[0],
+        "text": row[1],
+        "processed_text": row[2],
+        "status": row[3],
+        "worker_id": row[4],
+        "created_at": row[5].isoformat(),
+        "completed_at": (
+            row[6].isoformat()
+            if row[6]
+            else None
+        ),
+    }

@@ -1,8 +1,19 @@
 import os
 import socket
 from datetime import datetime, timezone
-
+from my_processor import process_text
+from postgres import save_request
+import asyncio
+import random
 import boto3
+from dynamodb import (
+    get_waiting_requests,
+    get_request,
+    mark_consumed,
+    all_workers_consumed,
+    claim_processing,
+    delete_request,
+)
 
 
 TABLE_NAME = os.getenv(
@@ -97,3 +108,138 @@ def get_active_workers():
     )
 
     return response.get("Items", [])
+
+async def consume_requests(worker_id: str):
+
+    while True:
+
+        try:
+
+            requests = await asyncio.to_thread(
+                get_waiting_requests
+            )
+
+            for request in requests:
+
+                request_id = request["request_id"]
+
+                expected_workers = request.get(
+                    "expected_workers",
+                    [],
+                )
+
+                # This worker is not part of the request snapshot
+                if worker_id not in expected_workers:
+                    continue
+
+
+                # Try to consume only once
+                consumed = await asyncio.to_thread(
+                    mark_consumed,
+                    request_id,
+                    worker_id,
+                )
+
+                if not consumed:
+                    continue
+
+
+                print(
+                    f"Worker {worker_id} consumed "
+                    f"request {request_id}"
+                )
+
+
+                # Random sleep
+                sleep_time = random.randint(1, 10)
+
+                print(
+                    f"Worker {worker_id} sleeping "
+                    f"{sleep_time} seconds"
+                )
+
+                await asyncio.sleep(sleep_time)
+
+
+                # Keep checking until all expected workers consume
+                while True:
+
+                    request = await asyncio.to_thread(
+                        get_request,
+                        request_id,
+                    )
+
+                    # Another worker may already have deleted it
+                    if request is None:
+                        break
+
+
+                    if all_workers_consumed(request):
+
+                        # Only one pod can claim processing
+                        claimed = await asyncio.to_thread(
+                            claim_processing,
+                            request_id,
+                        )
+
+                        if claimed:
+
+                            print(
+                                f"Worker {worker_id} "
+                                f"claimed request {request_id}"
+                            )
+
+                            # Actual processing will happen here
+                            # We add it in the next step
+
+                            text = request["text"]
+
+                            processed_text = await asyncio.to_thread(
+                                process_text,
+                                text,
+                            )
+
+                            await asyncio.to_thread(
+                                save_request,
+                                request_id,
+                                text,
+                                processed_text,
+                                worker_id,
+                            )
+
+                            print(
+                                f"Worker {worker_id} processed "
+                                f"request {request_id}"
+                            )
+
+
+                            await asyncio.to_thread(
+                                delete_request,
+                                request_id,
+                            )
+
+                            print(
+                                f"Worker {worker_id} deleted "
+                                f"cache for {request_id}"
+                            )
+
+                        break
+
+
+                    print(
+                        f"Worker {worker_id}: not all "
+                        f"workers consumed {request_id}, "
+                        f"waiting 5 seconds"
+                    )
+
+                    await asyncio.sleep(5)
+
+
+        except Exception as e:
+
+            print(
+                f"Consumer error for worker "
+                f"{worker_id}: {e}"
+            )
+
+        await asyncio.sleep(2)

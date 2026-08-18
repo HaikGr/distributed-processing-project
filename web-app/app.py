@@ -3,8 +3,9 @@ import uuid
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
-from my_processor import process_text
-from postgres import init_db
+from dynamodb import (
+    create_request,
+)
 import asyncio
 from contextlib import asynccontextmanager
 from worker import (
@@ -12,9 +13,14 @@ from worker import (
     heartbeat,
     unregister_worker,
     get_active_workers,
+    consume_requests,
 )
-from dynamodb import get_all_requests as get_cache_requests
-from postgres import save_request
+from postgres import (
+    init_db,
+    get_request as get_completed_request,
+    get_all_requests as get_completed_requests,
+    save_request
+)
 
 worker_id = None
 
@@ -25,8 +31,8 @@ async def lifespan(app: FastAPI):
 
     init_db()
 
-    # Register this pod
     worker_id = register_worker()
+
 
     async def heartbeat_loop():
 
@@ -40,24 +46,45 @@ async def lifespan(app: FastAPI):
 
             await asyncio.sleep(10)
 
-    task = asyncio.create_task(heartbeat_loop())
+
+    heartbeat_task = asyncio.create_task(
+        heartbeat_loop()
+    )
+
+    consumer_task = asyncio.create_task(
+        consume_requests(worker_id)
+    )
+
 
     try:
+
         yield
 
     finally:
 
-        task.cancel()
+        heartbeat_task.cancel()
+        consumer_task.cancel()
+
 
         try:
-            await task
+            await heartbeat_task
         except asyncio.CancelledError:
             pass
 
+
+        try:
+            await consumer_task
+        except asyncio.CancelledError:
+            pass
+
+
         try:
             unregister_worker()
+
         except Exception as e:
-            print(f"Failed to unregister worker: {e}")
+            print(
+                f"Failed to unregister worker: {e}"
+            )
 
 
 app = FastAPI(lifespan=lifespan)
@@ -337,11 +364,6 @@ def home():
 
                     });
 
-
-                    const data =
-                        await response.json();
-
-
                     if (!response.ok) {
 
                         throw new Error(
@@ -350,6 +372,34 @@ def home():
                         );
 
                     }
+
+                    const data =
+                        await response.json();
+                    const requestId = data.request_id;
+
+                    let completedData = null;
+
+                    while (true) {
+
+                        await new Promise(
+                            resolve => setTimeout(resolve, 2000)
+                        );
+
+                        const statusResponse =
+                            await fetch(`/request/${requestId}`);
+
+                        const statusData =
+                            await statusResponse.json();
+
+                        if (statusData.status === "COMPLETED") {
+
+                            completedData = statusData;
+
+                            break;
+                        }
+                    }
+
+
 
 
                     // Display result
@@ -372,7 +422,7 @@ def home():
                         </strong>
 
                         <div>
-                            ${escapeHtml(data.original_text)}
+                            ${escapeHtml(completedData.text)}
                         </div>
 
                         <br>
@@ -382,23 +432,23 @@ def home():
                         </strong>
 
                         <div class="processed">
-                            ${escapeHtml(data.processed_text)}
+                            ${escapeHtml(completedData.processed_text)}
                         </div>
 
                         <div class="info">
 
                             <strong>Request ID:</strong>
-                            ${data.request_id}
+                            ${completedData.request_id}
 
                             <br>
 
                             <strong>Status:</strong>
-                            ${data.status}
+                            ${completedData.status}
 
                             <br>
 
                             <strong>Worker:</strong>
-                            ${data.worker_id}
+                            ${completedData.worker_id}
 
                         </div>
                     `;
@@ -451,52 +501,74 @@ def home():
 
 
 @app.post("/process")
-def process_request(request: TextRequest):
+async def process_request(request: TextRequest):
 
     request_id = str(uuid.uuid4())
 
-    processed_text = process_text(request.text)
 
-    save_request(
-        request_id=request_id,
-        text=request.text,
-        processed_text=processed_text,
-        worker_id=worker_id,
+    workers = await asyncio.to_thread(
+        get_active_workers
     )
+
+
+    expected_workers = [
+        worker["worker_id"]
+        for worker in workers
+        if worker.get("status") == "ACTIVE"
+    ]
+
+
+    if not expected_workers:
+
+        return {
+            "request_id": request_id,
+            "status": "FAILED",
+            "message": "No active workers available",
+        }
+
+
+    await asyncio.to_thread(
+        create_request,
+        request_id,
+        request.text,
+        expected_workers,
+    )
+
+
+    print(
+        f"Created request {request_id} "
+        f"for workers: {expected_workers}"
+    )
+
 
     return {
         "request_id": request_id,
-        "status": "COMPLETED",
+        "status": "WAITING",
         "original_text": request.text,
-        "processed_text": processed_text,
-        "worker_id": worker_id,
+        "expected_workers": expected_workers,
     }
-
-
-
-
 
 @app.get("/workers")
 def workers():
 
     workers = get_active_workers()
-    requests = get_all_requests()
+    requests = get_completed_requests()
 
     result = []
 
     for worker in workers:
 
-        worker_id = worker["worker_id"]
+        current_worker_id = worker["worker_id"]
 
         worker_requests = [
             request
             for request in requests
-            if request.get("worker_id") == worker_id
+            if request.get("worker_id") == current_worker_id
         ]
 
         result.append(
             {
-                "worker_id": worker_id,
+                "worker_id": current_worker_id,
                 "status": worker.get("status"),
                 "last_heartbeat": worker.get("last_heartbeat"),
                 "requests_processed": len(worker_requests),
@@ -508,3 +580,17 @@ def workers():
         "total_active_workers": len(result),
         "workers": result,
     }
+
+@app.get("/request/{request_id}")
+def request_status(request_id: str):
+
+    request = get_completed_request(request_id)
+
+    if request is None:
+
+        return {
+            "request_id": request_id,
+            "status": "WAITING",
+        }
+
+    return request
