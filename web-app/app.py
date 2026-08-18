@@ -14,7 +14,6 @@ from worker import (
     unregister_worker,
     get_active_workers,
     consume_requests,
-    worker_manager,
 )
 from postgres import (
     init_db,
@@ -56,10 +55,6 @@ async def lifespan(app: FastAPI):
         consume_requests(worker_id)
     )
 
-    manager_task = asyncio.create_task(
-    worker_manager()
-    )
-
 
     try:
 
@@ -69,8 +64,6 @@ async def lifespan(app: FastAPI):
 
         heartbeat_task.cancel()
         consumer_task.cancel()
-        manager_task.cancel()
-
 
         try:
             await heartbeat_task
@@ -82,12 +75,6 @@ async def lifespan(app: FastAPI):
             await consumer_task
         except asyncio.CancelledError:
             pass
-
-        try:
-            await manager_task
-        except asyncio.CancelledError:
-            pass
-
 
         try:
             unregister_worker()
@@ -374,6 +361,9 @@ def home():
                         })
 
                     });
+                    
+                    const data =
+                        await response.json();
 
                     if (!response.ok) {
 
@@ -384,8 +374,7 @@ def home():
 
                     }
 
-                    const data =
-                        await response.json();
+
                     const requestId = data.request_id;
 
                     let completedData = null;

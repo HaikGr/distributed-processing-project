@@ -2,10 +2,14 @@ import boto3
 import os
 from datetime import datetime, timezone
 
-
-TABLE_NAME = os.getenv(
+REQUESTS_TABLE_NAME = os.getenv(
     "DYNAMODB_TABLE",
     "distributed-processing",
+)
+
+WORKERS_TABLE_NAME = os.getenv(
+    "WORKERS_TABLE",
+    "distributed-workers",
 )
 
 
@@ -14,7 +18,37 @@ dynamodb = boto3.resource(
     region_name=os.environ["AWS_DEFAULT_REGION"],
 )
 
-table = dynamodb.Table(TABLE_NAME)
+table = dynamodb.Table(
+    REQUESTS_TABLE_NAME
+)
+
+workers_table = dynamodb.Table(
+    WORKERS_TABLE_NAME
+)
+
+def get_all_workers():
+
+    workers = []
+
+    response = table.scan()
+
+    workers.extend(
+        response.get("Items", [])
+    )
+
+    while "LastEvaluatedKey" in response:
+
+        response = table.scan(
+            ExclusiveStartKey=response[
+                "LastEvaluatedKey"
+            ]
+        )
+
+        workers.extend(
+            response.get("Items", [])
+        )
+
+    return workers
 
 
 def create_request(
@@ -116,7 +150,17 @@ def all_workers_consumed(request: dict):
         request.get("consumed_by", [])
     )
 
-    return expected_workers.issubset(consumed_by)
+    active_workers = get_active_worker_ids()
+
+    # Only workers that were expected AND
+    # are still active are required
+    required_workers = (
+        expected_workers & active_workers
+    )
+
+    return required_workers.issubset(
+        consumed_by
+    )
 
 
 def claim_processing(request_id: str):
