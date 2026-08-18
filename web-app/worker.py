@@ -41,13 +41,16 @@ def get_current_time() -> str:
 
 
 def register_worker():
+
     worker_id = get_worker_id()
+    now = get_current_time()
 
     table.put_item(
         Item={
             "worker_id": worker_id,
             "status": "ACTIVE",
-            "last_heartbeat": get_current_time(),
+            "last_heartbeat": now,
+            "registered_at": now,
         }
     )
 
@@ -243,3 +246,75 @@ async def consume_requests(worker_id: str):
             )
 
         await asyncio.sleep(2)
+
+HEARTBEAT_TIMEOUT = 30
+
+
+def cleanup_inactive_workers():
+
+    now = datetime.now(timezone.utc)
+
+    response = table.scan()
+
+    workers = response.get("Items", [])
+
+    for worker in workers:
+
+        worker_id = worker["worker_id"]
+
+        last_heartbeat = worker.get("last_heartbeat")
+
+        if not last_heartbeat:
+            continue
+
+        last_heartbeat_time = datetime.fromisoformat(
+            last_heartbeat
+        )
+
+        age = (
+            now - last_heartbeat_time
+        ).total_seconds()
+
+        if age > HEARTBEAT_TIMEOUT:
+
+            print(
+                f"Worker {worker_id} "
+                f"has not sent heartbeat for "
+                f"{age:.1f}s. Marking INACTIVE."
+            )
+
+            table.update_item(
+                Key={
+                    "worker_id": worker_id,
+                },
+
+                UpdateExpression="""
+                    SET #status = :inactive
+                """,
+
+                ExpressionAttributeNames={
+                    "#status": "status",
+                },
+
+                ExpressionAttributeValues={
+                    ":inactive": "INACTIVE",
+                },
+            )
+
+async def worker_manager():
+
+    while True:
+
+        try:
+
+            await asyncio.to_thread(
+                cleanup_inactive_workers
+            )
+
+        except Exception as e:
+
+            print(
+                f"Worker manager error: {e}"
+            )
+
+        await asyncio.sleep(10)
