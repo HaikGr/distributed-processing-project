@@ -1,6 +1,7 @@
 import os
-import psycopg
 from datetime import datetime, timezone
+
+import psycopg
 
 
 DB_HOST = os.environ["POSTGRES_HOST"]
@@ -11,6 +12,7 @@ DB_PASSWORD = os.environ["POSTGRES_PASSWORD"]
 
 
 def get_connection():
+
     return psycopg.connect(
         host=DB_HOST,
         port=DB_PORT,
@@ -30,18 +32,10 @@ def init_db():
                 """
                 CREATE TABLE IF NOT EXISTS requests (
                     request_id VARCHAR(255) PRIMARY KEY,
-
                     text TEXT NOT NULL,
-
-                    processed_text TEXT,
-
+                    processed_text TEXT NOT NULL,
                     status VARCHAR(50) NOT NULL,
-
-                    worker_id VARCHAR(255),
-
-                    created_at TIMESTAMPTZ NOT NULL,
-
-                    completed_at TIMESTAMPTZ
+                    created_at TIMESTAMPTZ NOT NULL
                 );
                 """
             )
@@ -53,10 +47,7 @@ def save_request(
     request_id: str,
     text: str,
     processed_text: str,
-    worker_id: str,
 ):
-
-    now = datetime.now(timezone.utc)
 
     with get_connection() as conn:
 
@@ -69,14 +60,9 @@ def save_request(
                     text,
                     processed_text,
                     status,
-                    worker_id,
-                    created_at,
-                    completed_at
+                    created_at
                 )
-
                 VALUES (
-                    %s,
-                    %s,
                     %s,
                     %s,
                     %s,
@@ -89,9 +75,7 @@ def save_request(
                     text,
                     processed_text,
                     "COMPLETED",
-                    worker_id,
-                    now,
-                    now,
+                    datetime.now(timezone.utc),
                 ),
             )
 
@@ -111,9 +95,7 @@ def get_all_requests():
                     text,
                     processed_text,
                     status,
-                    worker_id,
-                    created_at,
-                    completed_at
+                    created_at
                 FROM requests
                 ORDER BY created_at DESC;
                 """
@@ -127,16 +109,11 @@ def get_all_requests():
             "text": row[1],
             "processed_text": row[2],
             "status": row[3],
-            "worker_id": row[4],
-            "created_at": row[5].isoformat(),
-            "completed_at": (
-                row[6].isoformat()
-                if row[6]
-                else None
-            ),
+            "created_at": row[4].isoformat(),
         }
         for row in rows
     ]
+
 
 def get_request(request_id: str):
 
@@ -151,9 +128,7 @@ def get_request(request_id: str):
                     text,
                     processed_text,
                     status,
-                    worker_id,
-                    created_at,
-                    completed_at
+                    created_at
                 FROM requests
                 WHERE request_id = %s;
                 """,
@@ -162,21 +137,13 @@ def get_request(request_id: str):
 
             row = cursor.fetchone()
 
-
     if row is None:
         return None
-
 
     return {
         "request_id": row[0],
         "text": row[1],
         "processed_text": row[2],
         "status": row[3],
-        "worker_id": row[4],
-        "created_at": row[5].isoformat(),
-        "completed_at": (
-            row[6].isoformat()
-            if row[6]
-            else None
-        ),
+        "created_at": row[4].isoformat(),
     }

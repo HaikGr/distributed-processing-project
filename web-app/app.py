@@ -1,91 +1,34 @@
 import uuid
+import asyncio
+
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
-from dynamodb import (
-    create_request,
-)
-import asyncio
-from contextlib import asynccontextmanager
-from worker import (
-    register_worker,
-    heartbeat,
-    unregister_worker,
-    get_active_workers,
-    consume_requests,
-)
+
+from my_processor import process_text
+
 from postgres import (
     init_db,
-    get_request as get_completed_request,
-    get_all_requests as get_completed_requests,
-    save_request
+    save_request,
+    get_all_requests,
+    get_request,
 )
 
-worker_id = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
 
-    global worker_id
+    # Create PostgreSQL table when application starts
+    await asyncio.to_thread(init_db)
 
-    init_db()
-
-    worker_id = register_worker()
-
-
-    async def heartbeat_loop():
-
-        while True:
-
-            try:
-                await asyncio.to_thread(heartbeat)
-
-            except Exception as e:
-                print(f"Heartbeat failed: {e}")
-
-            await asyncio.sleep(10)
+    yield
 
 
-    heartbeat_task = asyncio.create_task(
-        heartbeat_loop()
-    )
-
-    consumer_task = asyncio.create_task(
-        consume_requests(worker_id)
-    )
-
-
-    try:
-
-        yield
-
-    finally:
-
-        heartbeat_task.cancel()
-        consumer_task.cancel()
-
-        try:
-            await heartbeat_task
-        except asyncio.CancelledError:
-            pass
-
-
-        try:
-            await consumer_task
-        except asyncio.CancelledError:
-            pass
-
-        try:
-            unregister_worker()
-
-        except Exception as e:
-            print(
-                f"Failed to unregister worker: {e}"
-            )
-
-
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(
+    lifespan=lifespan
+)
 
 
 class TextRequest(BaseModel):
@@ -94,25 +37,95 @@ class TextRequest(BaseModel):
 
 @app.get("/health")
 def health():
+
     return {
         "status": "healthy",
-        "worker_id": worker_id,
+    }
+
+
+@app.post("/process")
+async def process_request(
+    request: TextRequest,
+):
+
+    request_id = str(
+        uuid.uuid4()
+    )
+
+    # Process the text immediately
+    processed_text = await asyncio.to_thread(
+        process_text,
+        request.text,
+    )
+
+    # Save result directly to PostgreSQL
+    await asyncio.to_thread(
+        save_request,
+        request_id,
+        request.text,
+        processed_text,
+    )
+
+    print(
+        f"Request {request_id} completed "
+        f"and saved to PostgreSQL"
+    )
+
+    # Return the result immediately
+    return {
+        "request_id": request_id,
+        "text": request.text,
+        "processed_text": processed_text,
+        "status": "COMPLETED",
+    }
+
+
+@app.get("/request/{request_id}")
+def request_status(
+    request_id: str,
+):
+
+    request = get_request(
+        request_id
+    )
+
+    if request is None:
+
+        return {
+            "detail": "Request not found",
+        }
+
+    return request
+
+
+@app.get("/requests")
+def requests():
+
+    return {
+        "requests": get_all_requests(),
     }
 
 
 @app.get("/", response_class=HTMLResponse)
 def home():
+
     return """
     <!DOCTYPE html>
     <html lang="en">
 
     <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-        <title>Distributed Processor</title>
+        <meta charset="UTF-8">
+
+        <meta
+            name="viewport"
+            content="width=device-width, initial-scale=1.0"
+        >
+
+        <title>Text Processor</title>
 
         <style>
+
             * {
                 box-sizing: border-box;
             }
@@ -140,13 +153,11 @@ def home():
                 border-radius: 16px;
 
                 box-shadow:
-                    0 10px 30px rgba(0, 0, 0, 0.1);
+                    0 10px 30px
+                    rgba(0, 0, 0, 0.1);
             }
 
             h1 {
-                margin-top: 0;
-                margin-bottom: 10px;
-
                 text-align: center;
             }
 
@@ -155,15 +166,6 @@ def home():
                 color: #666;
 
                 margin-bottom: 30px;
-            }
-
-            .worker {
-                text-align: center;
-
-                font-size: 13px;
-                color: #888;
-
-                margin-bottom: 20px;
             }
 
             textarea {
@@ -179,12 +181,6 @@ def home():
                 font-size: 16px;
 
                 resize: vertical;
-
-                outline: none;
-            }
-
-            textarea:focus {
-                border-color: #2563eb;
             }
 
             button {
@@ -206,14 +202,8 @@ def home():
                 cursor: pointer;
             }
 
-            button:hover {
-                background: #1d4ed8;
-            }
-
             button:disabled {
                 background: #999;
-
-                cursor: not-allowed;
             }
 
             #result {
@@ -232,13 +222,11 @@ def home():
 
             .success {
                 background: #dcfce7;
-
                 color: #166534;
             }
 
             .error {
                 background: #fee2e2;
-
                 color: #991b1b;
             }
 
@@ -256,29 +244,22 @@ def home():
                 font-weight: bold;
             }
 
-            .info {
-                margin-top: 10px;
-
-                font-size: 13px;
-
-                color: #555;
-            }
         </style>
+
     </head>
 
     <body>
 
         <div class="container">
 
-            <h1>Distributed Processor</h1>
+            <h1>
+                Text Processor
+            </h1>
 
             <p class="subtitle">
-                Send text to the distributed processing system
+                Enter text, process it,
+                and save the result to PostgreSQL
             </p>
-
-            <div class="worker">
-                Worker: <strong id="worker"></strong>
-            </div>
 
             <textarea
                 id="text"
@@ -299,38 +280,31 @@ def home():
 
         <script>
 
-            // Display the Kubernetes pod/worker
-            fetch("/health")
-                .then(response => response.json())
-                .then(data => {
-                    document.getElementById("worker").innerText =
-                        data.worker_id;
-                })
-                .catch(() => {
-                    document.getElementById("worker").innerText =
-                        "Unknown";
-                });
-
-
             async function processText() {
 
                 const text =
-                    document.getElementById("text").value;
+                    document.getElementById(
+                        "text"
+                    ).value;
 
                 const button =
-                    document.getElementById("processButton");
+                    document.getElementById(
+                        "processButton"
+                    );
 
                 const result =
-                    document.getElementById("result");
+                    document.getElementById(
+                        "result"
+                    );
 
-
-                // Validate input
 
                 if (!text.trim()) {
 
-                    result.style.display = "block";
+                    result.style.display =
+                        "block";
 
-                    result.className = "error";
+                    result.className =
+                        "error";
 
                     result.innerText =
                         "Please enter some text.";
@@ -339,31 +313,35 @@ def home():
                 }
 
 
-                // Disable button
-
                 button.disabled = true;
 
-                button.innerText = "Processing...";
+                button.innerText =
+                    "Processing...";
 
 
                 try {
 
-                    const response = await fetch("/process", {
+                    const response =
+                        await fetch(
+                            "/process",
+                            {
+                                method: "POST",
 
-                        method: "POST",
+                                headers: {
+                                    "Content-Type":
+                                        "application/json"
+                                },
 
-                        headers: {
-                            "Content-Type": "application/json"
-                        },
+                                body: JSON.stringify({
+                                    text: text
+                                })
+                            }
+                        );
 
-                        body: JSON.stringify({
-                            text: text
-                        })
 
-                    });
-                    
                     const data =
                         await response.json();
+
 
                     if (!response.ok) {
 
@@ -371,42 +349,14 @@ def home():
                             data.detail ||
                             "Request failed"
                         );
-
                     }
 
 
-                    const requestId = data.request_id;
+                    result.style.display =
+                        "block";
 
-                    let completedData = null;
-
-                    while (true) {
-
-                        await new Promise(
-                            resolve => setTimeout(resolve, 2000)
-                        );
-
-                        const statusResponse =
-                            await fetch(`/request/${requestId}`);
-
-                        const statusData =
-                            await statusResponse.json();
-
-                        if (statusData.status === "COMPLETED") {
-
-                            completedData = statusData;
-
-                            break;
-                        }
-                    }
-
-
-
-
-                    // Display result
-
-                    result.style.display = "block";
-
-                    result.className = "success";
+                    result.className =
+                        "success";
 
 
                     result.innerHTML = `
@@ -422,7 +372,7 @@ def home():
                         </strong>
 
                         <div>
-                            ${escapeHtml(completedData.text)}
+                            ${escapeHtml(data.text)}
                         </div>
 
                         <br>
@@ -432,38 +382,45 @@ def home():
                         </strong>
 
                         <div class="processed">
-                            ${escapeHtml(completedData.processed_text)}
+                            ${escapeHtml(
+                                data.processed_text
+                            )}
                         </div>
 
-                        <div class="info">
+                        <br>
 
-                            <strong>Request ID:</strong>
-                            ${completedData.request_id}
+                        <strong>
+                            Request ID:
+                        </strong>
 
-                            <br>
+                        ${data.request_id}
 
-                            <strong>Status:</strong>
-                            ${completedData.status}
+                        <br>
 
-                            <br>
+                        <strong>
+                            Status:
+                        </strong>
 
-                            <strong>Worker:</strong>
-                            ${completedData.worker_id}
+                        ${data.status}
 
-                        </div>
+                        <br><br>
+
+                        ✓ Saved to PostgreSQL
                     `;
 
 
-                    // Clear textarea
-
-                    document.getElementById("text").value = "";
+                    document.getElementById(
+                        "text"
+                    ).value = "";
 
 
                 } catch (error) {
 
-                    result.style.display = "block";
+                    result.style.display =
+                        "block";
 
-                    result.className = "error";
+                    result.className =
+                        "error";
 
                     result.innerText =
                         error.message;
@@ -475,12 +432,9 @@ def home():
 
                     button.innerText =
                         "Process Text";
-
                 }
             }
 
-
-            // Prevent HTML injection when displaying user input
 
             function escapeHtml(text) {
 
@@ -498,99 +452,3 @@ def home():
 
     </html>
     """
-
-
-@app.post("/process")
-async def process_request(request: TextRequest):
-
-    request_id = str(uuid.uuid4())
-
-
-    workers = await asyncio.to_thread(
-        get_active_workers
-    )
-
-
-    expected_workers = [
-        worker["worker_id"]
-        for worker in workers
-        if worker.get("status") == "ACTIVE"
-    ]
-
-
-    if not expected_workers:
-
-        return {
-            "request_id": request_id,
-            "status": "FAILED",
-            "message": "No active workers available",
-        }
-
-
-    await asyncio.to_thread(
-        create_request,
-        request_id,
-        request.text,
-        expected_workers,
-    )
-
-
-    print(
-        f"Created request {request_id} "
-        f"for workers: {expected_workers}"
-    )
-
-
-    return {
-        "request_id": request_id,
-        "status": "WAITING",
-        "original_text": request.text,
-        "expected_workers": expected_workers,
-    }
-
-@app.get("/workers")
-def workers():
-
-    workers = get_active_workers()
-    requests = get_completed_requests()
-
-    result = []
-
-    for worker in workers:
-
-        current_worker_id = worker["worker_id"]
-
-        worker_requests = [
-            request
-            for request in requests
-            if request.get("worker_id") == current_worker_id
-        ]
-
-        result.append(
-            {
-                "worker_id": current_worker_id,
-                "status": worker.get("status"),
-                "last_heartbeat": worker.get("last_heartbeat"),
-                "requests_processed": len(worker_requests),
-                "requests": worker_requests,
-            }
-        )
-
-    return {
-        "total_active_workers": len(result),
-        "workers": result,
-    }
-
-@app.get("/request/{request_id}")
-def request_status(request_id: str):
-
-    request = get_completed_request(request_id)
-
-    if request is None:
-
-        return {
-            "request_id": request_id,
-            "status": "WAITING",
-        }
-
-    return request
