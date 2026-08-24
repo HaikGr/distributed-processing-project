@@ -3,4 +3,5 @@ uvicorn[standard]
 boto3[standard]
 botocore[crt]
 psycopg[binary]
+kafka-python
 my_processor==0.1.8
