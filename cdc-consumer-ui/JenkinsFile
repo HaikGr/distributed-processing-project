@@ -8,7 +8,7 @@ pipeline {
     environment {
         PATH = "/Users/user/.docker/bin:/usr/local/bin:/usr/bin:/bin:${env.PATH}"
 
-        IMAGE_NAME = 'cdc-consumer-ui
+        IMAGE_NAME = 'cdc-consumer-ui'
 
         NEXUS_PYPI_URL = 'http://localhost:8081/repository/pypi-group/simple/'
 
