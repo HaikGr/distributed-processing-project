@@ -7,7 +7,6 @@ from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
-from kafka_producer import send_message
 from my_processor import process_text
 
 from postgres import (
