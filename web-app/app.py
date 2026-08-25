@@ -15,8 +15,8 @@ from postgres import (
     save_request,
     get_all_requests,
     get_request,
+    create_message
 )
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -34,6 +34,10 @@ app = FastAPI(
 
 class TextRequest(BaseModel):
     text: str
+
+class MessageRequest(BaseModel):
+    conversation_id: str
+    content: str
 
 
 @app.get("/health")
@@ -451,5 +455,165 @@ def home():
 
     </body>
 
+    </html>
+    """
+
+@app.post("/messages")
+def send_message(message: MessageRequest):
+    try:
+        return create_message(
+            conversation_id=message.conversation_id,
+            sender="app1",
+            receiver="app2",
+            content=message.content,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to create message: {exc}",
+        )
+
+@app.get("/chat", response_class=HTMLResponse)
+def chat_page():
+    return """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>App 1 Chat</title>
+
+        <style>
+            body {
+                font-family: Arial, sans-serif;
+                max-width: 800px;
+                margin: 40px auto;
+                padding: 0 20px;
+                background: #f5f5f5;
+            }
+
+            h1 {
+                text-align: center;
+            }
+
+            #messages {
+                height: 500px;
+                overflow-y: auto;
+                background: white;
+                border: 1px solid #ddd;
+                border-radius: 10px;
+                padding: 15px;
+                margin-bottom: 15px;
+            }
+
+            .message {
+                margin: 8px 0;
+                padding: 10px 14px;
+                border-radius: 12px;
+                max-width: 70%;
+                word-wrap: break-word;
+            }
+
+            .mine {
+                margin-left: auto;
+                background: #d9fdd3;
+                text-align: right;
+            }
+
+            .theirs {
+                margin-right: auto;
+                background: #eeeeee;
+            }
+
+            #composer {
+                display: flex;
+                gap: 10px;
+            }
+
+            #messageInput {
+                flex: 1;
+                padding: 12px;
+                border: 1px solid #ccc;
+                border-radius: 8px;
+                font-size: 16px;
+            }
+
+            button {
+                padding: 12px 20px;
+                border: none;
+                border-radius: 8px;
+                cursor: pointer;
+            }
+        </style>
+    </head>
+
+    <body>
+        <h1>App 1 Chat</h1>
+
+        <div id="messages"></div>
+
+        <div id="composer">
+            <input
+                id="messageInput"
+                type="text"
+                placeholder="Type a message..."
+            />
+            <button onclick="sendMessage()">Send</button>
+        </div>
+
+        <script>
+            const messages = document.getElementById("messages");
+            const input = document.getElementById("messageInput");
+
+            function addMessage(message, own) {
+                const div = document.createElement("div");
+
+                div.className = "message " + (own ? "mine" : "theirs");
+
+                div.textContent =
+                    (message.sender === "app1" ? "You: " : "App 2: ")
+                    + message.content;
+
+                messages.appendChild(div);
+                messages.scrollTop = messages.scrollHeight;
+            }
+
+            async function sendMessage() {
+                const content = input.value.trim();
+
+                if (!content) {
+                    return;
+                }
+
+                const response = await fetch("/messages", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        conversation_id: "chat-1",
+                        content: content
+                    })
+                });
+
+                if (!response.ok) {
+                    alert("Failed to send message");
+                    return;
+                }
+
+                const message = await response.json();
+
+                addMessage(message, true);
+
+                input.value = "";
+                input.focus();
+            }
+
+            input.addEventListener("keydown", function(event) {
+                if (event.key === "Enter") {
+                    sendMessage();
+                }
+            });
+        </script>
+    </body>
     </html>
     """
