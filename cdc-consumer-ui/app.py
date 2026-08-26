@@ -37,12 +37,21 @@ APP_ID = os.getenv(
 app = FastAPI()
 
 messages = deque(maxlen=MAX_MESSAGES)
+typing_users = {}
+typing_lock = threading.Lock()
 
 
 consumer = Consumer({
     "bootstrap.servers": KAFKA_BOOTSTRAP_SERVERS,
     "group.id": KAFKA_GROUP_ID,
     "auto.offset.reset": "earliest",
+    "enable.auto.commit": True,
+})
+
+typing_consumer = Consumer({
+    "bootstrap.servers": KAFKA_BOOTSTRAP_SERVERS,
+    "group.id": f"{KAFKA_GROUP_ID}-typing",
+    "auto.offset.reset": "latest",
     "enable.auto.commit": True,
 })
 
@@ -53,6 +62,40 @@ typing_producer = Producer({
 class MessageRequest(BaseModel):
     conversation_id: str
     content: str
+
+class TypingRequest(BaseModel):
+    conversation_id: str
+    is_typing: bool
+
+
+@app.post("/typing")
+def update_typing(typing: TypingRequest):
+    event = {
+        "event_type": "typing",
+        "conversation_id": typing.conversation_id,
+        "user_id": APP_ID,
+        "is_typing": typing.is_typing,
+    }
+
+    try:
+        typing_producer.produce(
+            KAFKA_TYPING_TOPIC,
+            key=f"{typing.conversation_id}:{APP_ID}",
+            value=json.dumps(event).encode("utf-8"),
+        )
+
+        typing_producer.flush()
+
+        return {
+            "status": "sent",
+            "event": event,
+        }
+
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to publish typing event: {exc}",
+        )
 
 
 @app.post("/messages")
@@ -69,6 +112,63 @@ def send_message(message: MessageRequest):
             status_code=500,
             detail=f"Failed to create message: {exc}",
         )
+
+def consume_typing_events() -> None:
+    typing_consumer.subscribe([KAFKA_TYPING_TOPIC])
+
+    print(
+        f"Typing consumer started. "
+        f"topic={KAFKA_TYPING_TOPIC}, "
+        f"group={KAFKA_GROUP_ID}-typing"
+    )
+
+    try:
+        while True:
+            msg = typing_consumer.poll(1.0)
+
+            if msg is None:
+                continue
+
+            if msg.error():
+                print(f"Typing Kafka error: {msg.error()}")
+                continue
+
+            try:
+                event = json.loads(
+                    msg.value().decode("utf-8")
+                )
+
+                # Ignore events produced by this application.
+                if event.get("user_id") == APP_ID:
+                    continue
+
+                user_id = event.get("user_id")
+
+                if not user_id:
+                    continue
+
+                with typing_lock:
+                    typing_users[user_id] = event.get(
+                        "is_typing",
+                        False,
+                    )
+
+                print(
+                    f"Typing event received: "
+                    f"user={user_id}, "
+                    f"is_typing={event.get('is_typing')}"
+                )
+
+            except Exception as exc:
+                print(
+                    f"Failed to process typing event: {exc}"
+                )
+
+    except Exception as exc:
+        print(f"Typing consumer stopped: {exc}")
+
+    finally:
+        typing_consumer.close()
 
 
 def consume_messages() -> None:
@@ -137,13 +237,31 @@ consumer_thread = threading.Thread(
     target=consume_messages,
     daemon=True,
 )
+typing_consumer_thread = threading.Thread(
+    target=consume_typing_events,
+    daemon=True,
+)
 
 consumer_thread.start()
+typing_consumer_thread.start()
 
 
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+@app.get("/api/typing")
+def get_typing() -> dict[str, Any]:
+    with typing_lock:
+        users = [
+            user_id
+            for user_id, is_typing in typing_users.items()
+            if is_typing
+        ]
+
+    return {
+        "typing_users": users,
+    }
 
 
 @app.get("/api/messages")
@@ -264,6 +382,14 @@ def index() -> str:
             cursor: pointer;
             font-size: 15px;
         }
+
+        #typingIndicator {
+            min-height: 24px;
+            padding: 4px 15px;
+            font-size: 13px;
+            font-style: italic;
+            color: #666;
+        }
     </style>
 </head>
 
@@ -277,6 +403,8 @@ def index() -> str:
     </div>
 
     <div id="messages"></div>
+
+    <div id="typingIndicator"></div>
 
     <div class="composer">
         <input
@@ -296,7 +424,33 @@ def index() -> str:
     const input =
         document.getElementById("messageInput");
 
+    const typingIndicator =
+    document.getElementById("typingIndicator");
+
+    let isTyping = false;
+    let typingTimeout = null;
+
     let displayedIds = new Set();
+
+    async function publishTyping(isCurrentlyTyping) {
+        try {
+            await fetch("/typing", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    conversation_id: "chat-1",
+                    is_typing: isCurrentlyTyping
+                })
+            });
+        } catch (error) {
+            console.error(
+                "Failed to publish typing event:",
+                error
+            );
+        }
+    }
 
     function renderMessage(message) {
         if (displayedIds.has(message.id)) {
@@ -351,12 +505,48 @@ def index() -> str:
         }
     }
 
+    async function loadTyping() {
+        try {
+            const response =
+                await fetch("/api/typing");
+
+            if (!response.ok) {
+                return;
+            }
+
+            const data =
+                await response.json();
+
+            if (data.typing_users.length > 0) {
+                typingIndicator.textContent =
+                    data.typing_users
+                        .map(user => `${user} is typing...`)
+                        .join(", ");
+            } else {
+                typingIndicator.textContent = "";
+            }
+
+        } catch (error) {
+            console.error(
+                "Failed to load typing state:",
+                error
+            );
+        }
+    }
+
     async function sendMessage() {
         const content =
             input.value.trim();
 
         if (!content) {
             return;
+        }
+
+        clearTimeout(typingTimeout);
+
+        if (isTyping) {
+            isTyping = false;
+            await publishTyping(false);
         }
 
         try {
@@ -392,9 +582,27 @@ def index() -> str:
         }
     });
 
+    input.addEventListener("input", function() {
+
+    if (!isTyping && input.value.trim()) {
+        isTyping = true;
+        publishTyping(true);
+    }
+
+    clearTimeout(typingTimeout);
+
+        typingTimeout = setTimeout(function() {
+            if (isTyping) {
+                isTyping = false;
+                publishTyping(false);
+            }
+        }, 1500);
+    });
+
     loadMessages();
 
     setInterval(loadMessages, 1000);
+    setInterval(loadTyping, 500);
 </script>
 
 </body>
