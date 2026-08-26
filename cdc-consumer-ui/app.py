@@ -29,6 +29,11 @@ MAX_MESSAGES = int(
     os.getenv("MAX_MESSAGES", "100")
 )
 
+KAFKA_TYPING_TOPIC = os.getenv(
+    "KAFKA_TYPING_TOPIC",
+    "chat-typing",
+)
+
 APP_ID = os.getenv(
     "APP_ID",
     "app2",
