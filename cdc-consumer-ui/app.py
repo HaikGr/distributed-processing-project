@@ -4,7 +4,7 @@ import threading
 from collections import deque
 from typing import Any
 
-from confluent_kafka import Consumer
+from confluent_kafka import Consumer, Producer
 from fastapi import FastAPI,  HTTPException
 from fastapi.responses import HTMLResponse
 from chat_postgres import create_message
@@ -29,6 +29,10 @@ MAX_MESSAGES = int(
     os.getenv("MAX_MESSAGES", "100")
 )
 
+APP_ID = os.getenv(
+    "APP_ID",
+    "app2",
+)
 
 app = FastAPI()
 
@@ -40,6 +44,10 @@ consumer = Consumer({
     "group.id": KAFKA_GROUP_ID,
     "auto.offset.reset": "earliest",
     "enable.auto.commit": True,
+})
+
+typing_producer = Producer({
+    "bootstrap.servers": KAFKA_BOOTSTRAP_SERVERS,
 })
 
 class MessageRequest(BaseModel):
