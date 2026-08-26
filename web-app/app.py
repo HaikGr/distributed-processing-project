@@ -1,13 +1,17 @@
 import uuid
 import asyncio
-
 from contextlib import asynccontextmanager
-
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
-
 from my_processor import process_text
+import json
+import os
+import threading
+from collections import deque
+from typing import Any
+
+from confluent_kafka import Consumer
 
 from postgres import (
     init_db,
@@ -16,6 +20,27 @@ from postgres import (
     get_request,
     create_message
 )
+
+
+KAFKA_BOOTSTRAP_SERVERS = os.getenv(
+    "KAFKA_BOOTSTRAP_SERVERS",
+    "my-kafka-kafka-bootstrap.kafka.svc.cluster.local:9092",
+)
+
+KAFKA_TOPIC = os.getenv(
+    "KAFKA_TOPIC",
+    "chat-messages",
+)
+
+KAFKA_GROUP_ID = os.getenv(
+    "KAFKA_GROUP_ID",
+    "app1-chat",
+)
+
+MAX_MESSAGES = int(
+    os.getenv("MAX_MESSAGES", "100")
+)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -29,6 +54,84 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     lifespan=lifespan
 )
+
+chat_messages = deque(maxlen=MAX_MESSAGES)
+
+
+consumer = Consumer({
+    "bootstrap.servers": KAFKA_BOOTSTRAP_SERVERS,
+    "group.id": KAFKA_GROUP_ID,
+    "auto.offset.reset": "earliest",
+    "enable.auto.commit": True,
+})
+
+
+def consume_chat_messages() -> None:
+    consumer.subscribe([KAFKA_TOPIC])
+
+    print(
+        f"Chat consumer started: "
+        f"topic={KAFKA_TOPIC}, "
+        f"group={KAFKA_GROUP_ID}, "
+        f"bootstrap={KAFKA_BOOTSTRAP_SERVERS}"
+    )
+
+    try:
+        while True:
+            msg = consumer.poll(1.0)
+
+            if msg is None:
+                continue
+
+            if msg.error():
+                print(f"Kafka error: {msg.error()}")
+                continue
+
+            try:
+                value = json.loads(
+                    msg.value().decode("utf-8")
+                )
+
+                after = value.get("after")
+
+                if not after:
+                    continue
+
+                event = {
+                    "id": after.get("id"),
+                    "conversation_id": after.get("conversation_id"),
+                    "sender": after.get("sender"),
+                    "receiver": after.get("receiver"),
+                    "content": after.get("content"),
+                    "created_at": after.get("created_at"),
+                }
+
+                chat_messages.appendleft(event)
+
+                print(
+                    f"Received chat message: "
+                    f"sender={event['sender']} "
+                    f"receiver={event['receiver']} "
+                    f"content={event['content']!r}"
+                )
+
+            except Exception as exc:
+                print(
+                    f"Failed to process Kafka message: {exc}"
+                )
+
+    except Exception as exc:
+        print(f"Chat consumer stopped: {exc}")
+
+    finally:
+        consumer.close()
+
+consumer_thread = threading.Thread(
+    target=consume_chat_messages,
+    daemon=True,
+)
+
+consumer_thread.start()
 
 
 class TextRequest(BaseModel):
@@ -457,6 +560,10 @@ def home():
     </html>
     """
 
+@app.get("/api/messages")
+def get_chat_messages() -> list[dict[str, Any]]:
+    return list(chat_messages)
+
 @app.post("/messages")
 def send_message(message: MessageRequest):
     try:
@@ -560,58 +667,131 @@ def chat_page():
         </div>
 
         <script>
-            const messages = document.getElementById("messages");
-            const input = document.getElementById("messageInput");
+            const messagesContainer =
+                document.getElementById("messages");
 
-            function addMessage(message, own) {
+            const input =
+                document.getElementById("messageInput");
+
+            const displayedMessages = new Set();
+
+            function addMessage(message) {
+                if (displayedMessages.has(message.id)) {
+                    return;
+                }
+
+                displayedMessages.add(message.id);
+
                 const div = document.createElement("div");
 
-                div.className = "message " + (own ? "mine" : "theirs");
+                div.className =
+                    "message " +
+                    (
+                        message.sender === "app1"
+                            ? "mine"
+                            : "theirs"
+                    );
 
                 div.textContent =
-                    (message.sender === "app1" ? "You: " : "App 2: ")
-                    + message.content;
+                    (
+                        message.sender === "app1"
+                            ? "You: "
+                            : "App 2: "
+                    ) + message.content;
 
-                messages.appendChild(div);
-                messages.scrollTop = messages.scrollHeight;
+                messagesContainer.appendChild(div);
+
+                messagesContainer.scrollTop =
+                    messagesContainer.scrollHeight;
             }
 
+
+            async function loadMessages() {
+                try {
+                    const response =
+                        await fetch("/api/messages");
+
+                    if (!response.ok) {
+                        return;
+                    }
+
+                    const data =
+                        await response.json();
+
+                    // Backend keeps newest first.
+                    // We display oldest → newest.
+                    data.reverse().forEach(addMessage);
+
+                } catch (error) {
+                    console.error(
+                        "Failed to load chat messages:",
+                        error
+                    );
+                }
+            }
+
+
             async function sendMessage() {
-                const content = input.value.trim();
+                const content =
+                    input.value.trim();
 
                 if (!content) {
                     return;
                 }
 
-                const response = await fetch("/messages", {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json"
-                    },
-                    body: JSON.stringify({
-                        conversation_id: "chat-1",
-                        content: content
-                    })
-                });
+                try {
+                    const response =
+                        await fetch("/messages", {
+                            method: "POST",
 
-                if (!response.ok) {
+                            headers: {
+                                "Content-Type":
+                                    "application/json"
+                            },
+
+                            body: JSON.stringify({
+                                conversation_id: "chat-1",
+                                content: content
+                            })
+                        });
+
+                    if (!response.ok) {
+                        alert("Failed to send message");
+                        return;
+                    }
+
+                    const message =
+                        await response.json();
+
+                    // Display our own message immediately.
+                    addMessage(message);
+
+                    input.value = "";
+                    input.focus();
+
+                } catch (error) {
+                    console.error(error);
                     alert("Failed to send message");
-                    return;
                 }
-
-                const message = await response.json();
-
-                addMessage(message, true);
-
-                input.value = "";
-                input.focus();
             }
 
-            input.addEventListener("keydown", function(event) {
-                if (event.key === "Enter") {
-                    sendMessage();
+
+            input.addEventListener(
+                "keydown",
+                function(event) {
+                    if (event.key === "Enter") {
+                        sendMessage();
+                    }
                 }
-            });
+            );
+
+
+            loadMessages();
+
+            setInterval(
+                loadMessages,
+                1000
+            );
         </script>
     </body>
     </html>
