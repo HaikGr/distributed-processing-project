@@ -1,5 +1,5 @@
 import os
-import psycopg2
+import psycopg
 
 
 DB_HOST = os.environ["POSTGRES_HOST"]
@@ -15,7 +15,7 @@ def create_message(
     receiver: str,
     content: str,
 ) -> dict:
-    connection = psycopg2.connect(
+    connection = psycopg.connect(
         host=DB_HOST,
         port=DB_PORT,
         dbname=DB_NAME,
